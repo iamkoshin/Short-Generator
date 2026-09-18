@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI YouTube Shorts Generator</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🎬</span>
+        <h1>AI Shorts Generator</h1>
+      </div>
+      <p class="subtitle">Turn any YouTube video into viral 9:16 Shorts</p>
+    </header>
+
+    <!-- Main Form -->
+    <section class="card form-card">
+      <div class="field">
+        <label for="url">YouTube URL</label>
+        <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="numClips">Number of Shorts</label>
+          <select id="numClips">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+            <option value="5">5</option>
+            <option value="10">10</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="aspectRatio">Aspect Ratio</label>
+          <select id="aspectRatio">
+            <option value="9:16" selected>9:16 (TikTok/Reels)</option>
+            <option value="1:1">1:1 (Square)</option>
+            <option value="4:5">4:5 (Instagram)</option>
+            <option value="16:9">16:9 (Landscape)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="local" selected>🟢 Local (Gemini)</option>
+            <option value="api">🔵 API (MuAPI)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="format">Download Quality</label>
+          <select id="format">
+            <option value="360">360p</option>
+            <option value="480">480p</option>
+            <option value="720" selected>720p</option>
+            <option value="1080">1080p</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="language">Language (optional)</label>
+        <input id="language" type="text" placeholder="e.g. en, auto-detect if left blank" />
+      </div>
+
+      <button id="generateBtn" class="btn-generate">
+        <span class="btn-text">⚡ Generate Shorts</span>
+        <span class="btn-loader hidden">⏳ Generating…</span>
+      </button>
+    </section>
+
+    <!-- Progress -->
+    <section id="progressSection" class="card hidden">
+      <div class="progress-bar-track">
+        <div id="progressBar" class="progress-bar-fill" style="width: 0%"></div>
+      </div>
+      <p id="progressText" class="progress-text">Queued…</p>
+    </section>
+
+    <!-- Results -->
+    <section id="resultsSection" class="card hidden">
+      <h2 id="resultsTitle">✅ Generated Shorts</h2>
+      <div id="generationSummary" class="generation-summary hidden"></div>
+      <div id="shortsList" class="shorts-list"></div>
+      <button id="resetBtn" class="btn-reset">← New Generation</button>
+    </section>
+
+    <!-- Error -->
+    <section id="errorSection" class="card error-card hidden">
+      <h2>❌ Error</h2>
+      <p id="errorMsg"></p>
+      <button id="retryBtn" class="btn-reset">Retry</button>
+    </section>
+  </div>
+
+  <!-- Video Preview Modal -->
+  <div id="videoModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <button id="modalCloseBtn" class="modal-close">&times;</button>
+      <video id="previewVideo" controls playsinline></video>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

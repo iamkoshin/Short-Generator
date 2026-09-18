@@ -6,3 +6,27 @@ venv/
 output/
 *.mp4
 .DS_Store
+*.db
+*.sqlite
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Generated artifacts
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Claude
+.claude/
