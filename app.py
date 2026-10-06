@@ -1,56 +1,94 @@
 """Web API server for AI YouTube Shorts Generator."""
+from __future__ import annotations
+
 import os
 import sys
-import uuid
 import threading
 import time
+import re
+import uuid
+from typing import Any, Dict
+from urllib.parse import urlparse
 
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
+# pyrefly: ignore [missing-import]
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
+
 load_dotenv()
 
-from flask import Flask, request, jsonify, send_from_directory, send_file, abort
+# Reconfigure stdout/stderr for UTF-8 on Windows before any background threads start.
+# The '→' character and other Unicode used in prompts will fail with the default
+# charmap codec when printed from a background thread.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
 # In-memory job store (replace with Redis/DB in production)
-jobs: dict[str, dict] = {}
+jobs: Dict[str, Dict[str, Any]] = {}
 
 # Track local clip paths for serving
-clip_store: dict[str, dict] = {}
+clip_store: Dict[str, Dict[str, Any]] = {}
 
 
-@app.get("/")
+@app.route("/", methods=["GET"])
 def index():
     return send_from_directory("templates", "index.html")
 
 
-@app.post("/api/generate")
+@app.route("/api/generate", methods=["POST"])
 def generate():
-    data = request.get_json(force=True)
-    url = data.get("url", "").strip()
+    data = request.get_json(force=True, silent=True) or {}
+    url = str(data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "YouTube URL is required"}), 400
 
-    num_clips = int(data.get("num_clips", 3))
+    parsed = urlparse(url)
+    if parsed.scheme in ("http", "https"):
+        host = (parsed.hostname or "").lower()
+        own_host = (request.host.split(":")[0] or "").lower()
+        if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1", own_host):
+            return jsonify({"error": "That's the address of this app, not a video. Paste a YouTube link instead."}), 400
+    elif "://" in url:
+        return jsonify({"error": "Paste a YouTube link that starts with https://"}), 400
+
+    try:
+        num_clips = int(data.get("num_clips", 3))
+    except (TypeError, ValueError):
+        return jsonify({"error": "num_clips must be a number"}), 400
+    if not 1 <= num_clips <= 10:
+        return jsonify({"error": "num_clips must be between 1 and 10"}), 400
+
+    mode = str(data.get("mode") or "local").lower()
+    if mode not in ("local", "api"):
+        return jsonify({"error": "mode must be 'local' or 'api'"}), 400
+
     aspect_ratio = data.get("aspect_ratio", "9:16")
-    mode = data.get("mode", "local")
     language = data.get("language", None) or None
-    download_format = data.get("download_format", "720")
+    download_format = str(data.get("download_format", "720"))
 
     job_id = str(uuid.uuid4())[:8]
     jobs[job_id] = {
         "status": "queued",
         "progress": 0,
+        "stage": "Queued",
         "result": None,
         "error": None,
     }
+
+    def on_progress(pct: int, stage: str) -> None:
+        jobs[job_id]["progress"] = pct
+        jobs[job_id]["stage"] = stage
 
     def run():
         try:
             from shorts_generator import generate_shorts
 
             jobs[job_id]["status"] = "running"
-            jobs[job_id]["progress"] = 10
+            on_progress(5, "Starting")
 
             result = generate_shorts(
                 youtube_url=url,
@@ -59,15 +97,17 @@ def generate():
                 download_format=download_format,
                 language=language,
                 mode=mode,
+                progress_cb=on_progress,
+                job_id=job_id,
             )
 
             # Convert local file paths to /api/clips/ URLs for the frontend
             shorts = result.get("shorts", [])
-            for short in shorts:
+            for i, short in enumerate(shorts):
                 clip_path = short.get("clip_url")
                 if clip_path and os.path.isfile(clip_path):
                     # Store the local path for serving
-                    clip_id = f"{job_id}_{short.get('start_time', 0):.0f}"
+                    clip_id = f"{job_id}_{i}"
                     clip_store[clip_id] = {
                         "path": clip_path,
                         "mode": result.get("mode"),
@@ -76,23 +116,32 @@ def generate():
                     short["clip_url"] = f"/api/clips/{clip_id}"
                     short["clip_path"] = clip_path
 
-            jobs[job_id]["progress"] = 100
+            if shorts and not any(s.get("clip_url") for s in shorts):
+                first_error = next((s.get("error") for s in shorts if s.get("error")), "unknown error")
+                raise RuntimeError(f"All {len(shorts)} clips failed to render: {first_error}")
+
+            on_progress(100, "Done")
             jobs[job_id]["status"] = "completed"
             jobs[job_id]["result"] = {
                 "mode": result.get("mode"),
                 "source_video_url": result.get("source_video_url"),
                 "highlights_count": len(result.get("highlights", [])),
+                "duration": (result.get("transcript") or {}).get("duration"),
+                "aspect_ratio": aspect_ratio,
                 "shorts": shorts,
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             jobs[job_id]["status"] = "failed"
-            jobs[job_id]["error"] = str(e)
+            # Strip terminal colour codes some libraries (yt-dlp) put in messages.
+            jobs[job_id]["error"] = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).strip()
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify({"job_id": job_id, "status": "queued"})
 
 
-@app.get("/api/jobs/<job_id>")
+@app.route("/api/jobs/<job_id>", methods=["GET"])
 def get_job(job_id: str):
     job = jobs.get(job_id)
     if not job:
@@ -101,12 +150,13 @@ def get_job(job_id: str):
         "job_id": job_id,
         "status": job["status"],
         "progress": job["progress"],
+        "stage": job.get("stage"),
         "result": job["result"],
         "error": job["error"],
     })
 
 
-@app.get("/api/clips/<clip_id>")
+@app.route("/api/clips/<clip_id>", methods=["GET"])
 def serve_clip(clip_id: str):
     """Serve a generated clip file (local mode) or proxy to URL (API mode)."""
     clip = clip_store.get(clip_id)
@@ -127,7 +177,7 @@ def serve_clip(clip_id: str):
     abort(404, description="Clip file not found on disk")
 
 
-@app.get("/api/download/<clip_id>")
+@app.route("/api/download/<clip_id>", methods=["GET"])
 def download_clip(clip_id: str):
     """Download a generated clip file."""
     clip = clip_store.get(clip_id)
@@ -147,7 +197,7 @@ def download_clip(clip_id: str):
     abort(404, description="Clip file not found on disk")
 
 
-@app.post("/api/reset")
+@app.route("/api/reset", methods=["POST"])
 def reset_jobs():
     """Clear all jobs and clips from memory."""
     jobs.clear()
@@ -155,13 +205,18 @@ def reset_jobs():
     return jsonify({"status": "reset", "message": "All jobs and clips cleared"})
 
 
-@app.get("/api/status")
+@app.route("/api/status", methods=["GET"])
 def status():
     """Return server status and job count."""
     completed = sum(1 for j in jobs.values() if j["status"] == "completed")
     failed = sum(1 for j in jobs.values() if j["status"] == "failed")
     running = sum(1 for j in jobs.values() if j["status"] == "running")
     queued = sum(1 for j in jobs.values() if j["status"] == "queued")
+    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+    gemini = None
+    if provider == "gemini":
+        from shorts_generator.local.llm import gemini_quota_status
+        gemini = gemini_quota_status()
     return jsonify({
         "status": "ok",
         "total_jobs": len(jobs),
@@ -171,13 +226,14 @@ def status():
             "completed": completed,
             "failed": failed,
         },
-        "mode": os.getenv("LLM_PROVIDER", "openai"),
+        "mode": provider,
+        "gemini": gemini,
     })
 
 
 if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     port = int(os.getenv("PORT", 5000))
     print(f"AI YouTube Shorts Generator - serving on http://localhost:{port}")
+    # The reloader restarts the process on file changes, wiping the in-memory
+    # job store mid-run - keep it off.
     app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)

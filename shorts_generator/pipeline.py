@@ -6,12 +6,20 @@ Two modes:
   * mode="local"            — yt-dlp + faster-whisper + OpenAI or Gemini + ffmpeg/opencv.
                               Self-hosted, LLM_PROVIDER selects OpenAI or Gemini.
 """
-from typing import Dict, List, Optional
+import os
+from typing import Callable, Dict, List, Optional
 
 from .clipper import crop_highlights
 from .downloader import download_youtube
 from .highlights import call_muapi_llm, get_highlights
 from .transcriber import transcribe
+
+# progress_cb(percent, stage_label) - lets the web UI show pipeline stages.
+ProgressFn = Callable[[int, str], None]
+
+
+def _noop_progress(pct: int, stage: str) -> None:
+    pass
 
 
 def _run_local(
@@ -20,20 +28,26 @@ def _run_local(
     aspect_ratio: str,
     download_format: str,
     language: Optional[str],
+    progress_cb: ProgressFn,
+    job_id: Optional[str],
 ) -> Dict:
+    from .config import LOCAL_OUTPUT_DIR
     from .local.clipper import crop_highlights_local
     from .local.downloader import download_youtube_local
     from .local.llm import call_local_llm
     from .local.transcriber import transcribe_local
 
+    progress_cb(15, "Downloading video")
     source_path = download_youtube_local(youtube_url, fmt=download_format)
 
+    progress_cb(40, "Transcribing audio")
     transcript = transcribe_local(source_path, language=language)
     if not transcript["segments"]:
         raise RuntimeError(
             "Whisper produced no segments. The video may have no detectable speech."
         )
 
+    progress_cb(65, "Finding viral highlights")
     highlights_result = get_highlights(transcript, num_clips=num_clips, llm_fn=call_local_llm)
     all_highlights: List[Dict] = highlights_result.get("highlights", [])
     if not all_highlights:
@@ -42,7 +56,10 @@ def _run_local(
     top = sorted(all_highlights, key=lambda h: int(h.get("score", 0)), reverse=True)[:num_clips]
     print(f"[pipeline/local] cropping {len(top)} of {len(all_highlights)} candidates", flush=True)
 
-    shorts = crop_highlights_local(source_path, top, aspect_ratio=aspect_ratio)
+    progress_cb(80, "Cutting & reframing clips")
+    # Per-job folder so a new run never overwrites an earlier job's clips.
+    out_dir = os.path.join(LOCAL_OUTPUT_DIR, job_id) if job_id else None
+    shorts = crop_highlights_local(source_path, top, aspect_ratio=aspect_ratio, out_dir=out_dir)
 
     return {
         "mode": "local",
@@ -59,15 +76,19 @@ def _run_api(
     aspect_ratio: str,
     download_format: str,
     language: Optional[str],
+    progress_cb: ProgressFn,
 ) -> Dict:
+    progress_cb(15, "Downloading video")
     source_url = download_youtube(youtube_url, fmt=download_format)
 
+    progress_cb(40, "Transcribing audio")
     transcript = transcribe(source_url, language=language)
     if not transcript["segments"]:
         raise RuntimeError(
             "Whisper produced no segments. The video may have no detectable speech."
         )
 
+    progress_cb(65, "Finding viral highlights")
     highlights_result = get_highlights(transcript, num_clips=num_clips, llm_fn=call_muapi_llm)
     all_highlights: List[Dict] = highlights_result.get("highlights", [])
     if not all_highlights:
@@ -76,6 +97,7 @@ def _run_api(
     top = sorted(all_highlights, key=lambda h: int(h.get("score", 0)), reverse=True)[:num_clips]
     print(f"[pipeline] cropping {len(top)} of {len(all_highlights)} candidates", flush=True)
 
+    progress_cb(80, "Cropping clips")
     shorts = crop_highlights(source_url, top, aspect_ratio=aspect_ratio)
 
     return {
@@ -94,6 +116,8 @@ def generate_shorts(
     download_format: str = "720",
     language: Optional[str] = None,
     mode: str = "api",
+    progress_cb: Optional[ProgressFn] = None,
+    job_id: Optional[str] = None,
 ) -> Dict:
     """Run the full pipeline and return a structured result.
 
@@ -105,6 +129,8 @@ def generate_shorts(
         language: ISO-639-1 to force Whisper language detection.
         mode: "api" (default, MuAPI) or "local" (yt-dlp + faster-whisper +
             OpenAI or Gemini + ffmpeg).
+        progress_cb: optional callback(percent, stage) for UI progress.
+        job_id: local mode writes clips to <LOCAL_OUTPUT_DIR>/<job_id>/.
 
     Returns:
         {
@@ -116,8 +142,9 @@ def generate_shorts(
         }
     """
     mode = (mode or "api").lower()
+    progress_cb = progress_cb or _noop_progress
     if mode == "local":
-        return _run_local(youtube_url, num_clips, aspect_ratio, download_format, language)
+        return _run_local(youtube_url, num_clips, aspect_ratio, download_format, language, progress_cb, job_id)
     if mode == "api":
-        return _run_api(youtube_url, num_clips, aspect_ratio, download_format, language)
+        return _run_api(youtube_url, num_clips, aspect_ratio, download_format, language, progress_cb)
     raise ValueError(f"Unknown mode: {mode!r}. Use 'api' or 'local'.")

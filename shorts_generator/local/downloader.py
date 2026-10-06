@@ -5,6 +5,7 @@ directly off disk.
 """
 import os
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from typing import Optional
@@ -23,15 +24,59 @@ def _import_ytdlp():
     return yt_dlp
 
 
+def ffmpeg_exe() -> str:
+    """Bundled imageio-ffmpeg binary if installed, else rely on ffmpeg on PATH."""
+    try:
+        import imageio_ffmpeg  # type: ignore
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        return "ffmpeg"
+
+
+def has_audio(path: str) -> bool:
+    """True if the media file contains at least one audio stream."""
+    # `ffmpeg -i` with no output exits non-zero but prints the stream list to stderr.
+    proc = subprocess.run(
+        [ffmpeg_exe(), "-hide_banner", "-i", path],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return re.search(r"Stream #\d+:\d+.*: Audio:", proc.stderr) is not None
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _friendly_download_error(message: str) -> str:
+    """Strip yt-dlp's terminal colours / prefix and explain the common cases."""
+    text = _ANSI_RE.sub("", message).strip()
+    text = re.sub(r"^ERROR:\s*", "", text)
+    if text.startswith("Unsupported URL"):
+        return (
+            "That link isn't a video page we can download. "
+            "Paste a YouTube video link, like https://www.youtube.com/watch?v=..."
+        )
+    if "Private video" in text or "Sign in" in text:
+        return "That video is private or needs a sign-in, so it can't be downloaded."
+    if "Video unavailable" in text:
+        return "That video is unavailable. It may have been removed or blocked in your region."
+    return f"Download failed: {text}"
+
+
 def _format_for(fmt: str) -> str:
-    """Map our '720' / '1080' shorthand to a yt-dlp format selector."""
+    """Map our '720' / '1080' shorthand to a yt-dlp format selector.
+
+    Prefers H.264 + m4a (decodes everywhere) and never accepts a silent,
+    video-only file — Whisper needs the audio track.
+    """
     try:
         height = int(fmt)
     except ValueError:
         height = 720
     return (
-        f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
-        f"best[height<={height}][ext=mp4]/best"
+        f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]/"
+        f"bestvideo[height<={height}]+bestaudio/"
+        f"best[height<={height}][acodec!=none]/"
+        f"best[acodec!=none]"
     )
 
 
@@ -88,7 +133,11 @@ def _existing_download(out_dir: str, video_id: str) -> Optional[str]:
     for ext in (".mp4", ".mkv", ".webm"):
         candidate = os.path.join(out_dir, f"source_{video_id}{ext}")
         if os.path.exists(candidate):
-            return candidate
+            if has_audio(candidate):
+                return candidate
+            # Earlier runs could cache a video-only file; purge it so we re-download.
+            print(f"[download/local] cached file has no audio, deleting: {candidate}", flush=True)
+            os.remove(candidate)
     return None
 
 
@@ -110,7 +159,7 @@ def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[s
             print(f"[download/local] reusing cached download: {cached}", flush=True)
             return cached
 
-    print(f"[download/local] {video_url} @ {fmt}p → {out_dir}/", flush=True)
+    print(f"[download/local] {video_url} @ {fmt}p -> {out_dir}/", flush=True)
     ydl_opts = {
         "format": _format_for(fmt),
         "outtmpl": os.path.join(out_dir, "source_%(id)s.%(ext)s"),
@@ -118,10 +167,22 @@ def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[s
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
+        "retries": 10,
+        "fragment_retries": 10,
+        "js_runtimes": {"node": {}},
+        # YouTube's signature/n challenges need the EJS solver script; without it
+        # audio formats go missing and downloads come back silent.
+        "remote_components": ["ejs:github"],
     }
+    exe = ffmpeg_exe()
+    if exe != "ffmpeg":
+        ydl_opts["ffmpeg_location"] = exe
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_url, download=True)
+        try:
+            info = ydl.extract_info(video_url, download=True)
+        except yt_dlp.utils.DownloadError as e:
+            raise RuntimeError(_friendly_download_error(str(e))) from e
         path = ydl.prepare_filename(info)
         # merge_output_format may rename the extension after merge
         if not os.path.exists(path):
@@ -130,6 +191,13 @@ def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[s
                 if os.path.exists(stem + ext):
                     path = stem + ext
                     break
+
+    if not has_audio(path):
+        os.remove(path)
+        raise RuntimeError(
+            "Downloaded video has no audio track, so it can't be transcribed. "
+            "Try updating yt-dlp (pip install -U yt-dlp) or a different quality."
+        )
 
     print(f"[download/local] ready: {path}", flush=True)
     return path

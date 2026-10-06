@@ -281,7 +281,12 @@ def get_highlights(
     """
     llm_fn = llm_fn or call_muapi_llm
     duration = transcript.get("duration", 0)
-    content_info = detect_content_type(transcript, llm_fn=llm_fn)
+    from .config import LLM_DETECT_CONTENT_TYPE
+
+    if LLM_DETECT_CONTENT_TYPE:
+        content_info = detect_content_type(transcript, llm_fn=llm_fn)
+    else:
+        content_info = {"content_type": "other", "density": "medium"}
     print(f"[highlights] content={content_info.get('content_type')} density={content_info.get('density')} duration={duration:.0f}s", flush=True)
 
     if duration >= LONG_VIDEO_THRESHOLD:

@@ -110,3 +110,17 @@ Two modes:
 - [ ] Add authentication if exposing publicly
 - [ ] Set `LOCAL_WHISPER_DEVICE=cuda` for GPU machines
 - [ ] Install all `requirements-local.txt` dependencies for local mode
+
+## Pipeline Fixes (2026-09-30)
+| Bug | Status | File |
+|---|---|---|
+| yt-dlp couldn't solve YouTube JS challenges → silent video-only download → Whisper crash | ✅ Fixed (`remote_components: ejs:github`, audio-required format chain, audio check purges bad cache) | `local/downloader.py` |
+| OpenCV 5 removed `cv2.CascadeClassifier` → every clip failed | ✅ Fixed (pinned `<5`, centre-crop fallback) | `local/clipper.py`, `requirements-local.txt` |
+| Capture not released on error → WinError 32 masked real error | ✅ Fixed | `local/clipper.py` |
+| Clips encoded as mp4v → not playable in browser | ✅ Fixed (H.264 yuv420p + faststart) | `local/clipper.py` |
+| Every job overwrote `output/short_NN.mp4` | ✅ Fixed (`output/<job_id>/`) | `pipeline.py` |
+| `gemini-2.5-flash` retired for new users (404) | ✅ Fixed (`gemini-3.8-flash`, retry + `GEMINI_FALLBACK_MODEL`) | `config.py`, `local/llm.py` |
+| UI stuck on 400/404, no stage text, per-clip errors hidden | ✅ Fixed | `app.py`, `app.js` |
+| Flask reloader wiped in-memory jobs mid-run | ✅ Fixed (`use_reloader=False`) | `app.py` |
+| ⚠️ Gemini free tier = 20 requests/day/model; one generation uses ~2+ | ⬜ Open (enable billing or switch provider) | `.env` |
+| Gemini free tier is 20 requests/day **per model** | ✅ Rotates through 8 Flash models (`GEMINI_MODELS`), remembers exhausted ones until midnight Pacific (`output/.gemini_quota.json`); content-type pre-pass off by default, so 1 request per generation (`LLM_DETECT_CONTENT_TYPE`) | `config.py`, `local/llm.py`, `highlights.py`, `app.py`, `app.js` |

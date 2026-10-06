@@ -14,7 +14,30 @@ POLL_TIMEOUT_SECONDS = float(os.getenv("MUAPI_POLL_TIMEOUT", "600"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Free-tier Gemini quotas are per model (20 requests/day each), so local mode
+# rotates through this list, best first, skipping models that hit today's limit.
+_DEFAULT_GEMINI_MODELS = (
+    "gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,"
+    "gemini-flash-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest"
+)
+
+
+def _gemini_model_list():
+    # Older .env files set GEMINI_MODEL / GEMINI_FALLBACK_MODEL; keep them first.
+    names = [os.getenv("GEMINI_MODEL", ""), os.getenv("GEMINI_FALLBACK_MODEL", "")]
+    names += os.getenv("GEMINI_MODELS", _DEFAULT_GEMINI_MODELS).split(",")
+    seen = []
+    for name in (n.strip() for n in names):
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+
+GEMINI_MODELS = _gemini_model_list()
+GEMINI_MODEL = GEMINI_MODELS[0]
+# The content-type pre-pass costs one extra LLM request per video for two hint
+# words; off by default so each generation uses a single request.
+LLM_DETECT_CONTENT_TYPE = os.getenv("LLM_DETECT_CONTENT_TYPE", "false").strip().lower() == "true"
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").strip().lower()
 LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "base")
 LOCAL_WHISPER_DEVICE = os.getenv("LOCAL_WHISPER_DEVICE", "auto")  # auto / cpu / cuda

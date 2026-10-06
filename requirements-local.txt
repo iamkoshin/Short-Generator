@@ -5,6 +5,10 @@ yt-dlp>=2024.1.1
 faster-whisper>=1.0.0
 openai>=1.0.0
 google-genai>=1.0.0
-opencv-python>=4.8.0
+# OpenCV 5 removed cv2.CascadeClassifier, which the face-tracking crop uses.
+opencv-python>=4.8.0,<5
+# Time-zone data for the Gemini daily-quota reset (Windows has none built in).
+tzdata>=2024.1
+imageio-ffmpeg>=0.4.9
 # torch is only needed if you want CUDA Whisper. CPU works without it.
 # torch>=2.0

@@ -3,115 +3,137 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI YouTube Shorts Generator</title>
+  <title>Shorts Cutter</title>
+  <meta name="description" content="Cut the best moments of any YouTube video into vertical Shorts." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231F4A3F'/%3E%3Crect x='11' y='6' width='10' height='20' rx='2' fill='%23FFD23F'/%3E%3C/svg%3E" />
 </head>
 <body>
-  <div class="app">
-    <!-- Header -->
-    <header class="header">
-      <div class="logo">
-        <span class="logo-icon">🎬</span>
-        <h1>AI Shorts Generator</h1>
-      </div>
-      <p class="subtitle">Turn any YouTube video into viral 9:16 Shorts</p>
+  <div class="mat">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Shorts Cutter home">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="1" y="1" width="30" height="30" rx="7" fill="none" stroke="currentColor" stroke-width="2"/>
+          <rect x="11" y="6" width="10" height="20" rx="2" fill="var(--marker)"/>
+        </svg>
+        <span>Shorts Cutter</span>
+      </a>
+      <p id="engineStatus" class="engine-status" aria-live="polite"><span class="dot"></span>Checking server…</p>
     </header>
 
-    <!-- Main Form -->
-    <section class="card form-card">
-      <div class="field">
-        <label for="url">YouTube URL</label>
-        <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
-      </div>
+    <main>
+      <section class="hero" aria-labelledby="heroTitle">
+        <h1 id="heroTitle" class="hero-title">Long video in.<br />Shorts out.</h1>
+        <p class="hero-sub">Paste a YouTube link. We transcribe it, find the moments people will actually stop scrolling for, and cut them into vertical clips.</p>
+      </section>
 
-      <div class="row">
-        <div class="field">
-          <label for="numClips">Number of Shorts</label>
-          <select id="numClips">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3" selected>3</option>
-            <option value="5">5</option>
-            <option value="10">10</option>
-          </select>
+      <!-- Form -->
+      <form id="cutForm" class="panel form-panel" novalidate>
+        <div class="url-row">
+          <label for="url" class="sr-only">YouTube link or local file path</label>
+          <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+                 placeholder="https://www.youtube.com/watch?v=…" required />
+          <button id="generateBtn" type="submit" class="btn-primary">
+            <span class="btn-text">Cut shorts</span>
+            <span class="btn-loader hidden" aria-hidden="true"><span class="spinner"></span>Cutting…</span>
+          </button>
         </div>
+        <p id="urlHint" class="field-hint" role="alert"></p>
 
-        <div class="field">
-          <label for="aspectRatio">Aspect Ratio</label>
-          <select id="aspectRatio">
-            <option value="9:16" selected>9:16 (TikTok/Reels)</option>
-            <option value="1:1">1:1 (Square)</option>
-            <option value="4:5">4:5 (Instagram)</option>
-            <option value="16:9">16:9 (Landscape)</option>
-          </select>
+        <div class="options">
+          <fieldset class="option">
+            <legend>How many</legend>
+            <div class="segmented" id="numClips">
+              <label><input type="radio" name="numClips" value="1" /><span>1</span></label>
+              <label><input type="radio" name="numClips" value="2" /><span>2</span></label>
+              <label><input type="radio" name="numClips" value="3" checked /><span>3</span></label>
+              <label><input type="radio" name="numClips" value="5" /><span>5</span></label>
+              <label><input type="radio" name="numClips" value="10" /><span>10</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="option">
+            <legend>Shape</legend>
+            <div class="segmented shapes" id="aspectRatio">
+              <label title="Shorts, TikTok, Reels"><input type="radio" name="aspectRatio" value="9:16" checked /><span><i style="--w:9;--h:16"></i>9:16</span></label>
+              <label title="Instagram feed"><input type="radio" name="aspectRatio" value="4:5" /><span><i style="--w:4;--h:5"></i>4:5</span></label>
+              <label title="Square"><input type="radio" name="aspectRatio" value="1:1" /><span><i style="--w:1;--h:1"></i>1:1</span></label>
+              <label title="Landscape"><input type="radio" name="aspectRatio" value="16:9" /><span><i style="--w:16;--h:9"></i>16:9</span></label>
+            </div>
+          </fieldset>
+
+          <div class="option">
+            <label for="format" class="option-label">Source quality</label>
+            <select id="format">
+              <option value="360">360p</option>
+              <option value="480">480p</option>
+              <option value="720" selected>720p</option>
+              <option value="1080">1080p</option>
+            </select>
+          </div>
+
+          <div class="option">
+            <label for="mode" class="option-label">Run on</label>
+            <select id="mode">
+              <option value="local" selected>Local</option>
+              <option value="api">MuAPI cloud</option>
+            </select>
+          </div>
+
+          <div class="option">
+            <label for="language" class="option-label">Language</label>
+            <input id="language" type="text" maxlength="5" placeholder="Auto" autocomplete="off" />
+          </div>
         </div>
-      </div>
+      </form>
 
-      <div class="row">
-        <div class="field">
-          <label for="mode">Mode</label>
-          <select id="mode">
-            <option value="local" selected>🟢 Local (Gemini)</option>
-            <option value="api">🔵 API (MuAPI)</option>
-          </select>
+      <!-- Progress -->
+      <section id="progressSection" class="panel progress-panel hidden" aria-live="polite">
+        <div class="progress-head">
+          <p id="progressText" class="progress-text">Sending…</p>
+          <p id="progressPct" class="progress-pct">0%</p>
         </div>
+        <div class="progress-track"><div id="progressBar" class="progress-fill" style="width:0%"></div></div>
+        <ol class="steps" id="steps">
+          <li data-step="Downloading video">Download</li>
+          <li data-step="Transcribing audio">Transcribe</li>
+          <li data-step="Finding viral highlights">Find highlights</li>
+          <li data-step="Cutting &amp; reframing clips">Cut clips</li>
+        </ol>
+        <p class="progress-note">A 10-minute video takes a few minutes on this computer. You can leave this tab open.</p>
+      </section>
 
-        <div class="field">
-          <label for="format">Download Quality</label>
-          <select id="format">
-            <option value="360">360p</option>
-            <option value="480">480p</option>
-            <option value="720" selected>720p</option>
-            <option value="1080">1080p</option>
-          </select>
+      <!-- Error -->
+      <section id="errorSection" class="panel error-panel hidden" role="alert">
+        <h2>That didn't work</h2>
+        <p id="errorMsg" class="error-msg"></p>
+        <button id="retryBtn" type="button" class="btn-secondary">Try again</button>
+      </section>
+
+      <!-- Results -->
+      <section id="resultsSection" class="results hidden" aria-labelledby="resultsTitle">
+        <div class="results-head">
+          <h2 id="resultsTitle" class="results-title">Your shorts</h2>
+          <button id="resetBtn" type="button" class="btn-ghost">Cut another video</button>
         </div>
-      </div>
+        <p id="generationSummary" class="results-summary"></p>
 
-      <div class="field">
-        <label for="language">Language (optional)</label>
-        <input id="language" type="text" placeholder="e.g. en, auto-detect if left blank" />
-      </div>
+        <figure id="cutMap" class="cutmap hidden">
+          <div class="cutmap-track" id="cutMapTrack"></div>
+          <figcaption class="cutmap-scale"><span>0:00</span><span id="cutMapEnd"></span></figcaption>
+        </figure>
 
-      <button id="generateBtn" class="btn-generate">
-        <span class="btn-text">⚡ Generate Shorts</span>
-        <span class="btn-loader hidden">⏳ Generating…</span>
-      </button>
-    </section>
+        <div id="shortsList" class="shorts-grid"></div>
+      </section>
+    </main>
 
-    <!-- Progress -->
-    <section id="progressSection" class="card hidden">
-      <div class="progress-bar-track">
-        <div id="progressBar" class="progress-bar-fill" style="width: 0%"></div>
-      </div>
-      <p id="progressText" class="progress-text">Queued…</p>
-    </section>
-
-    <!-- Results -->
-    <section id="resultsSection" class="card hidden">
-      <h2 id="resultsTitle">✅ Generated Shorts</h2>
-      <div id="generationSummary" class="generation-summary hidden"></div>
-      <div id="shortsList" class="shorts-list"></div>
-      <button id="resetBtn" class="btn-reset">← New Generation</button>
-    </section>
-
-    <!-- Error -->
-    <section id="errorSection" class="card error-card hidden">
-      <h2>❌ Error</h2>
-      <p id="errorMsg"></p>
-      <button id="retryBtn" class="btn-reset">Retry</button>
-    </section>
+    <footer class="footer">Clips are saved in the <code>output</code> folder on this computer.</footer>
   </div>
 
-  <!-- Video Preview Modal -->
-  <div id="videoModal" class="modal-overlay hidden">
-    <div class="modal-content">
-      <button id="modalCloseBtn" class="modal-close">&times;</button>
-      <video id="previewVideo" controls playsinline></video>
-    </div>
-  </div>
-
-  <!-- Toast Container -->
-  <div id="toastContainer" class="toast-container"></div>
+  <div id="toastContainer" class="toasts" aria-live="polite"></div>
 
   <script src="/static/js/app.js"></script>
 </body>
