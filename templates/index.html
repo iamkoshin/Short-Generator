@@ -27,15 +27,33 @@
     <main>
       <section class="hero" aria-labelledby="heroTitle">
         <h1 id="heroTitle" class="hero-title">Long video in.<br />Shorts out.</h1>
-        <p class="hero-sub">Paste a YouTube link. We transcribe it, find the moments people will actually stop scrolling for, and cut them into vertical clips.</p>
+        <p class="hero-sub">Paste a video link or upload a file. We transcribe it, find the moments people will actually stop scrolling for, and cut them into vertical clips.</p>
       </section>
 
       <!-- Form -->
       <form id="cutForm" class="panel form-panel" novalidate>
+        <div class="drop-overlay" aria-hidden="true"><span>Drop the video to upload it</span></div>
         <div class="url-row">
-          <label for="url" class="sr-only">YouTube link or local file path</label>
+          <label for="url" class="sr-only">Video link</label>
           <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
-                 placeholder="https://www.youtube.com/watch?v=…" required />
+                 placeholder="Paste a video link, or drop a video file here" required />
+
+          <div id="fileChip" class="file-chip hidden" aria-live="polite">
+            <svg class="file-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>
+            <div class="file-info">
+              <p id="fileName" class="file-name"></p>
+              <p id="fileMeta" class="file-meta"></p>
+              <div class="file-progress"><div id="fileBar" class="file-bar"></div></div>
+            </div>
+            <button id="fileRemove" type="button" class="file-remove" aria-label="Remove this video">&times;</button>
+          </div>
+
+          <button id="uploadBtn" type="button" class="btn-upload">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0l-5 5m5-5l5 5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Upload video
+          </button>
+          <input id="fileInput" type="file" accept="video/*,.mkv,.mov,.m4v" hidden />
+
           <button id="generateBtn" type="submit" class="btn-primary">
             <span class="btn-text">Cut shorts</span>
             <span class="btn-loader hidden" aria-hidden="true"><span class="spinner"></span>Cutting…</span>
@@ -130,7 +148,7 @@
       </section>
     </main>
 
-    <footer class="footer">Clips are saved in the <code>output</code> folder on this computer.</footer>
+    <footer class="footer">Clips and uploaded videos are saved in the <code>output</code> folder on this computer.</footer>
   </div>
 
   <div id="toastContainer" class="toasts" aria-live="polite"></div>

@@ -124,3 +124,5 @@ Two modes:
 | Flask reloader wiped in-memory jobs mid-run | ✅ Fixed (`use_reloader=False`) | `app.py` |
 | ⚠️ Gemini free tier = 20 requests/day/model; one generation uses ~2+ | ⬜ Open (enable billing or switch provider) | `.env` |
 | Gemini free tier is 20 requests/day **per model** | ✅ Rotates through 8 Flash models (`GEMINI_MODELS`), remembers exhausted ones until midnight Pacific (`output/.gemini_quota.json`); content-type pre-pass off by default, so 1 request per generation (`LLM_DETECT_CONTENT_TYPE`) | `config.py`, `local/llm.py`, `highlights.py`, `app.py`, `app.js` |
+| Jobs froze forever on "Finding viral highlights" (Gemini SDK has no request timeout) | ✅ Fixed: 150s timeout per model (`GEMINI_TIMEOUT_SECONDS`), then next model; stage shows which model is being asked + elapsed time; quota file records why a model was skipped | `local/llm.py`, `pipeline.py`, `app.js` |
+| Local videos needed a typed file path | ✅ Upload video button + drag-and-drop with progress; saved to `output/uploads/` (same file isn't stored twice), forces Local mode, size limit `MAX_UPLOAD_MB` | `app.py`, `index.html`, `app.js`, `style.css` |

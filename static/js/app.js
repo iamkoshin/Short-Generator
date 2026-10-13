@@ -32,6 +32,14 @@
 
   const toastContainer = document.getElementById("toastContainer");
 
+  const uploadBtn = document.getElementById("uploadBtn");
+  const fileInput = document.getElementById("fileInput");
+  const fileChip = document.getElementById("fileChip");
+  const fileName = document.getElementById("fileName");
+  const fileMeta = document.getElementById("fileMeta");
+  const fileBar = document.getElementById("fileBar");
+  const fileRemove = document.getElementById("fileRemove");
+
   let pollTimer = null;
   let pollRetryCount = 0;
   let llmProvider = "gemini";
@@ -137,12 +145,20 @@
   refreshStatus();
 
   // --- Progress ---
+  // Elapsed time on the current step, so a slow AI answer doesn't look frozen.
+  let stepKey = null;
+  let stepStart = 0;
+
   function setProgress(pct, stage) {
     pct = Math.max(0, Math.min(100, pct || 0));
     progressBar.style.width = pct + "%";
-    progressPct.textContent = pct + "%";
+    // Stages can carry detail, e.g. "Finding viral highlights (asking gemini-3.7-flash)".
+    const key = stage ? stage.replace(/\s*\(.*\)$/, "") : null;
+    if (key !== stepKey) { stepKey = key; stepStart = Date.now(); }
+    const secs = Math.round((Date.now() - stepStart) / 1000);
+    progressPct.textContent = pct + "%" + (key && key !== "Done" && secs >= 5 ? ", " + fmtTime(secs) : "");
     if (stage) progressText.textContent = stage === "Done" ? "Finishing up" : stage + "…";
-    const current = stage in STAGE_STEP ? STAGE_STEP[stage] : -1;
+    const current = key in STAGE_STEP ? STAGE_STEP[key] : -1;
     stepEls.forEach(function (li, i) {
       li.classList.toggle("done", i < current);
       li.classList.toggle("active", i === current);
@@ -342,12 +358,126 @@
     show(errorSection);
   }
 
+  // --- Upload a local video ---
+  const VIDEO_EXT = /\.(mp4|mov|mkv|webm|avi|m4v)$/i;
+  // upload: null, or { file, xhr, id (set once the server has it), error }
+  let upload = null;
+  let modeBeforeUpload = null;
+
+  function fmtSize(bytes) {
+    if (bytes >= 1024 * 1024 * 1024) return (bytes / 1024 / 1024 / 1024).toFixed(1) + " GB";
+    return Math.max(1, Math.round(bytes / 1024 / 1024)) + " MB";
+  }
+
+  function setChip(state, meta, pct) {
+    fileChip.classList.toggle("ready", state === "ready");
+    fileChip.classList.toggle("failed", state === "failed");
+    fileMeta.textContent = meta;
+    if (pct != null) fileBar.style.width = pct + "%";
+  }
+
+  function chooseFile(file) {
+    if (!file) return;
+    if (!VIDEO_EXT.test(file.name) && !(file.type || "").startsWith("video/")) {
+      urlHint.textContent = "That isn't a video file. Upload an mp4, mov, mkv, webm, avi or m4v.";
+      return;
+    }
+    clearFile();
+    urlHint.textContent = "";
+    urlInput.classList.remove("invalid");
+
+    // Uploaded files can only be cut on this computer.
+    modeBeforeUpload = modeSelect.value;
+    modeSelect.value = "local";
+    modeSelect.disabled = true;
+
+    hide(urlInput);
+    hide(uploadBtn);
+    show(fileChip);
+    fileName.textContent = file.name;
+    setChip("uploading", "Uploading… 0% of " + fmtSize(file.size), 0);
+
+    const xhr = new XMLHttpRequest();
+    upload = { file: file, xhr: xhr, id: null, error: null };
+    const mine = upload;
+    xhr.open("POST", "/api/upload");
+    xhr.upload.onprogress = function (e) {
+      if (!e.lengthComputable) return;
+      const pct = Math.round(e.loaded / e.total * 100);
+      setChip("uploading", "Uploading… " + pct + "% of " + fmtSize(file.size), pct);
+    };
+    xhr.onload = function () {
+      if (upload !== mine) return;
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status === 200 && data.upload_id) {
+        mine.id = data.upload_id;
+        setChip("ready", fmtSize(file.size) + ", ready to cut", 100);
+      } else {
+        mine.error = data.error || ("Upload failed (" + xhr.status + ").");
+        setChip("failed", mine.error);
+      }
+    };
+    xhr.onerror = function () {
+      if (upload !== mine) return;
+      mine.error = "Upload failed. Make sure app.py is running.";
+      setChip("failed", mine.error);
+    };
+    xhr.send((function () { const fd = new FormData(); fd.append("file", file); return fd; })());
+  }
+
+  function clearFile() {
+    if (upload && upload.xhr && !upload.id) upload.xhr.abort();
+    upload = null;
+    fileInput.value = "";
+    hide(fileChip);
+    show(urlInput);
+    show(uploadBtn);
+    if (modeBeforeUpload !== null) { modeSelect.value = modeBeforeUpload; modeBeforeUpload = null; }
+    modeSelect.disabled = false;
+  }
+
+  uploadBtn.addEventListener("click", function () { fileInput.click(); });
+  fileInput.addEventListener("change", function () { chooseFile(fileInput.files[0]); });
+  fileRemove.addEventListener("click", function () { clearFile(); urlInput.focus(); });
+
+  // Drag and drop anywhere on the form.
+  let dragDepth = 0;
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, "Files") >= 0; }
+  form.addEventListener("dragenter", function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    form.classList.add("dropping");
+  });
+  form.addEventListener("dragover", function (e) { if (hasFiles(e)) e.preventDefault(); });
+  form.addEventListener("dragleave", function () {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) form.classList.remove("dropping");
+  });
+  form.addEventListener("drop", function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    form.classList.remove("dropping");
+    chooseFile(e.dataTransfer.files[0]);
+  });
+  // A file dropped elsewhere on the page would make the browser navigate away to it.
+  window.addEventListener("dragover", function (e) { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener("drop", function (e) { if (hasFiles(e)) e.preventDefault(); });
+
   // --- Submit ---
   function startCut() {
+    if (upload) {
+      if (upload.error) { urlHint.textContent = "The upload failed. Remove it and try again."; return; }
+      if (!upload.id) { urlHint.textContent = "Wait for the upload to finish, then cut."; return; }
+      urlHint.textContent = "";
+      return submitJob({ upload_id: upload.id });
+    }
     const url = urlInput.value.trim();
     if (!url) {
       urlInput.classList.add("invalid");
-      urlHint.textContent = "Paste a YouTube link first.";
+      urlHint.textContent = "Paste a video link or upload a video first.";
       urlInput.focus();
       return;
     }
@@ -359,7 +489,10 @@
     }
     urlInput.classList.remove("invalid");
     urlHint.textContent = "";
+    submitJob({ url: url });
+  }
 
+  function submitJob(source) {
     stopPolling();
     hide(resultsSection);
     hide(errorSection);
@@ -371,7 +504,8 @@
     pollRetryCount = 0;
 
     const payload = {
-      url: url,
+      url: source.url || null,
+      upload_id: source.upload_id || null,
       num_clips: parseInt(radioValue("numClips"), 10),
       aspect_ratio: radioValue("aspectRatio"),
       mode: modeSelect.value,
@@ -410,6 +544,7 @@
     hide(resultsSection);
     hide(errorSection);
     urlInput.value = "";
+    clearFile();
     setButtonLoading(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
     urlInput.focus();

@@ -35,6 +35,9 @@ def _gemini_model_list():
 
 GEMINI_MODELS = _gemini_model_list()
 GEMINI_MODEL = GEMINI_MODELS[0]
+# The Gemini SDK has no request timeout by default, so a stalled request would
+# hang the job forever on "Finding viral highlights".
+GEMINI_TIMEOUT_SECONDS = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "150"))
 # The content-type pre-pass costs one extra LLM request per video for two hint
 # words; off by default so each generation uses a single request.
 LLM_DETECT_CONTENT_TYPE = os.getenv("LLM_DETECT_CONTENT_TYPE", "false").strip().lower() == "true"

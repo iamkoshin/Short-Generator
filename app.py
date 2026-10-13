@@ -5,6 +5,8 @@ import os
 import sys
 import threading
 import time
+import glob
+import hashlib
 import re
 import uuid
 from typing import Any, Dict
@@ -27,6 +29,14 @@ if hasattr(sys.stderr, "reconfigure"):
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
+# Uploaded videos live in <output>/uploads, named "<id>_<name>" where the id is a
+# hash of the original name + size, so re-uploading the same file reuses it (and
+# its cached transcript) instead of creating a copy.
+UPLOAD_DIR = os.path.join(os.getenv("LOCAL_OUTPUT_DIR", "output"), "uploads")
+UPLOAD_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "4096"))
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+
 # In-memory job store (replace with Redis/DB in production)
 jobs: Dict[str, Dict[str, Any]] = {}
 
@@ -39,15 +49,65 @@ def index():
     return send_from_directory("templates", "index.html")
 
 
+@app.errorhandler(413)
+def upload_too_large(_e):
+    return jsonify({"error": f"That file is bigger than the {MAX_UPLOAD_MB // 1024} GB upload limit (MAX_UPLOAD_MB)."}), 413
+
+
+def _upload_path(upload_id: str):
+    if not re.fullmatch(r"[0-9a-f]{12}", upload_id or ""):
+        return None
+    matches = glob.glob(os.path.join(UPLOAD_DIR, upload_id + "_*"))
+    return matches[0] if matches else None
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload_video():
+    """Save an uploaded video so it can be cut in local mode."""
+    from werkzeug.utils import secure_filename
+
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "Choose a video file to upload."}), 400
+    name = secure_filename(f.filename) or "video.mp4"
+    stem, ext = os.path.splitext(name)
+    if ext.lower() not in UPLOAD_EXTENSIONS:
+        allowed = ", ".join(sorted(e.lstrip(".") for e in UPLOAD_EXTENSIONS))
+        return jsonify({"error": f"That file type isn't supported. Upload a video ({allowed})."}), 400
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    tmp_path = os.path.join(UPLOAD_DIR, f".incoming_{uuid.uuid4().hex}{ext}")
+    f.save(tmp_path)
+    size = os.path.getsize(tmp_path)
+    upload_id = hashlib.sha1(f"{name}:{size}".encode()).hexdigest()[:12]
+
+    existing = _upload_path(upload_id)
+    if existing:
+        os.remove(tmp_path)  # same file uploaded before
+        path = existing
+    else:
+        path = os.path.join(UPLOAD_DIR, f"{upload_id}_{stem[:80]}{ext.lower()}")
+        os.replace(tmp_path, path)
+    return jsonify({"upload_id": upload_id, "name": f.filename, "size": size})
+
+
 @app.route("/api/generate", methods=["POST"])
 def generate():
     data = request.get_json(force=True, silent=True) or {}
     url = str(data.get("url") or "").strip()
-    if not url:
-        return jsonify({"error": "YouTube URL is required"}), 400
+    upload_id = str(data.get("upload_id") or "").strip()
+    if upload_id:
+        url = _upload_path(upload_id) or ""
+        if not url:
+            return jsonify({"error": "That upload is no longer on the server. Upload the video again."}), 400
+        data["mode"] = "local"  # MuAPI can't read files on this computer
+    elif not url:
+        return jsonify({"error": "Paste a YouTube link or upload a video."}), 400
 
     parsed = urlparse(url)
-    if parsed.scheme in ("http", "https"):
+    if upload_id:
+        pass
+    elif parsed.scheme in ("http", "https"):
         host = (parsed.hostname or "").lower()
         own_host = (request.host.split(":")[0] or "").lower()
         if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1", own_host):

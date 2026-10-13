@@ -188,6 +188,94 @@ main { flex: 1; }
 .btn-primary:active:not(:disabled) { transform: translateY(1px); }
 .btn-primary:disabled { cursor: progress; opacity: 0.85; }
 
+/* Upload: secondary button, the chosen-file chip, and the drag-and-drop overlay. */
+.form-panel { position: relative; }
+
+.btn-upload {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.975rem;
+  color: var(--ink);
+  background: #fff;
+  border: 1.5px solid #C9D6CF;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.btn-upload svg { width: 18px; height: 18px; }
+.btn-upload:hover { background: var(--paper-2); border-color: var(--ink-soft); }
+
+.file-chip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 10px 8px 14px;
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+}
+.file-chip.failed { border-color: var(--error); }
+.file-icon { flex: none; width: 26px; height: 26px; color: var(--mat); }
+.file-info { flex: 1; min-width: 0; }
+.file-name {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-meta { font-size: 0.8125rem; color: var(--ink-soft); }
+.file-chip.failed .file-meta { color: var(--error); }
+.file-progress {
+  height: 4px;
+  margin-top: 5px;
+  border-radius: 99px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.file-bar { height: 100%; width: 0; background: var(--mat); transition: width 0.2s; }
+.file-chip.ready .file-progress,
+.file-chip.failed .file-progress { display: none; }
+.file-remove {
+  flex: none;
+  width: 34px; height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.file-remove:hover { background: var(--paper-2); color: var(--ink); }
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: none;
+  place-items: center;
+  border-radius: inherit;
+  background: rgba(255, 210, 63, 0.94);
+  outline: 3px dashed var(--marker-ink);
+  outline-offset: -12px;
+  pointer-events: none;
+}
+.drop-overlay span {
+  font-family: var(--display);
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  color: var(--marker-ink);
+}
+.form-panel.dropping .drop-overlay { display: grid; }
+
 .btn-loader { display: inline-flex; align-items: center; gap: 10px; }
 .spinner {
   width: 16px; height: 16px;
@@ -616,6 +704,7 @@ main { flex: 1; }
 @media (max-width: 640px) {
   .url-row { flex-direction: column; }
   .btn-primary { width: 100%; }
+  .btn-upload { width: 100%; justify-content: center; }
   .options { gap: 16px; }
   .option { width: 100%; }
   .segmented { display: flex; }

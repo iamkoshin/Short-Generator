@@ -48,7 +48,12 @@ def _run_local(
         )
 
     progress_cb(65, "Finding viral highlights")
-    highlights_result = get_highlights(transcript, num_clips=num_clips, llm_fn=call_local_llm)
+    from .local.llm import set_status_callback
+    set_status_callback(lambda msg: progress_cb(65, f"Finding viral highlights ({msg})"))
+    try:
+        highlights_result = get_highlights(transcript, num_clips=num_clips, llm_fn=call_local_llm)
+    finally:
+        set_status_callback(None)
     all_highlights: List[Dict] = highlights_result.get("highlights", [])
     if not all_highlights:
         raise RuntimeError("Highlight generator returned zero clips.")

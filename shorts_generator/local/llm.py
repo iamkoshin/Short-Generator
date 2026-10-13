@@ -4,10 +4,11 @@ import json
 import os
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from ..config import (
     GEMINI_MODELS,
+    GEMINI_TIMEOUT_SECONDS,
     LLM_PROVIDER,
     LOCAL_OUTPUT_DIR,
     OPENAI_MODEL,
@@ -18,6 +19,23 @@ from ..config import (
 GEMINI_MAX_ATTEMPTS = 3
 # Short-lived failures worth a quick retry on the same model.
 RETRYABLE_CODES = (429, 500, 503)
+
+# Optional hook so the web UI can show which model is being asked right now.
+_status_cb: Optional[Callable[[str], None]] = None
+
+
+def set_status_callback(fn: Optional[Callable[[str], None]]) -> None:
+    global _status_cb
+    _status_cb = fn
+
+
+def _report(message: str) -> None:
+    print(f"[llm/gemini] {message}", flush=True)
+    if _status_cb:
+        try:
+            _status_cb(message)
+        except Exception:
+            pass
 
 
 def call_openai_llm(prompt: str) -> str:
@@ -77,12 +95,16 @@ class _QuotaBook:
 
     def exhausted_today(self) -> List[str]:
         today = _pacific_now().date().isoformat()
-        return [m for m, day in self._load().items() if day == today]
+        # Entries are {"date", "reason"}; older files stored just the date string.
+        return [
+            m for m, v in self._load().items()
+            if (v.get("date") if isinstance(v, dict) else v) == today
+        ]
 
-    def mark(self, model: str) -> None:
+    def mark(self, model: str, reason: str) -> None:
         with self.lock:
             data = self._load()
-            data[model] = _pacific_now().date().isoformat()
+            data[model] = {"date": _pacific_now().date().isoformat(), "reason": reason}
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             with open(self.path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -126,32 +148,44 @@ def call_gemini_llm(prompt: str) -> str:
             "    pip install -r requirements-local.txt"
         ) from e
 
+    import httpx  # installed with google-genai
     from google.genai import errors as genai_errors  # type: ignore
+    from google.genai import types as genai_types  # type: ignore
 
-    client = genai.Client(api_key=require_gemini_key())
+    client = genai.Client(
+        api_key=require_gemini_key(),
+        http_options=genai_types.HttpOptions(timeout=int(GEMINI_TIMEOUT_SECONDS * 1000)),
+    )
     skipped = set(_quota.exhausted_today())
     candidates = [m for m in GEMINI_MODELS if m not in skipped]
     last_error: Optional[Exception] = None
 
     for i, model in enumerate(candidates):
         nxt = candidates[i + 1] if i + 1 < len(candidates) else None
+        switching = f", switching to {nxt}" if nxt else ""
+        _report(f"asking {model}")
         try:
             text = _gemini_generate(client, genai_errors, model, prompt)
-            print(f"[llm/gemini] answered by {model}", flush=True)
+            _report(f"answered by {model}")
             return text
         except genai_errors.APIError as e:
             last_error = e
             reason = _skip_reason(e)
             if reason:
-                _quota.mark(model)
+                _quota.mark(model, reason)
             elif getattr(e, "code", None) not in RETRYABLE_CODES:
                 raise
-            print(
-                f"[llm/gemini] {model} {reason or 'still overloaded'}"
-                + (f", switching to {nxt}" if nxt else ""),
-                flush=True,
-            )
+            _report(f"{model} {reason or 'still overloaded'}{switching}")
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            # Stalled or dropped connection: try the next model rather than hang.
+            last_error = e
+            _report(f"{model} didn't answer within {GEMINI_TIMEOUT_SECONDS:.0f}s{switching}")
 
+    if isinstance(last_error, (httpx.TimeoutException, httpx.TransportError)):
+        raise RuntimeError(
+            "Gemini isn't answering (every model timed out). Check your internet connection, "
+            "or try again in a few minutes."
+        ) from last_error
     if last_error is not None and _skip_reason(last_error) is None:
         raise last_error  # every model was overloaded rather than out of quota
     raise RuntimeError(
